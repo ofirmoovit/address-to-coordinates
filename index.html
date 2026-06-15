@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Address → Lat/Lon Geocoder</title>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --accent: #38bdf8;
+    --accent-2: #0ea5e9;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --good: #34d399;
+    --bad: #f87171;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 40px 16px;
+  }
+  .app {
+    width: 100%;
+    max-width: 640px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
+  .sub code { background: #0b1220; padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+
+  .drop {
+    display: block;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    background: #0b1220;
+  }
+  .drop:hover, .drop.drag { border-color: var(--accent); background: #0d1830; }
+  .drop .icon { font-size: 34px; }
+  .drop .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .drop .file { color: var(--accent); font-weight: 600; margin-top: 10px; word-break: break-all; }
+  input[type=file] { display: none; }
+
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
+  button {
+    background: var(--accent-2);
+    color: #001018;
+    border: none;
+    padding: 12px 22px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter .15s, opacity .15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+  .ctry-label { font-size: 14px; color: var(--muted); }
+  select {
+    background: #0b1220;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  select:focus { outline: none; border-color: var(--accent); }
+
+  .check { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.45; }
+  .check input { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .check em { font-style: normal; opacity: .8; }
+  .check code { background: #0b1220; padding: 0 4px; border-radius: 4px; color: var(--accent); }
+
+  .bar-wrap { margin-top: 24px; display: none; }
+  .bar-wrap.show { display: block; }
+  .bar-bg { background: #0b1220; border-radius: 999px; height: 12px; overflow: hidden; border: 1px solid var(--border); }
+  .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; }
+  .bar-text { font-size: 13px; color: var(--muted); margin-top: 8px; display: flex; justify-content: space-between; }
+
+  .msg { margin-top: 18px; font-size: 14px; padding: 12px 14px; border-radius: 10px; display: none; }
+  .msg.show { display: block; }
+  .msg.err { background: rgba(248,113,113,.12); color: var(--bad); border: 1px solid rgba(248,113,113,.4); }
+  .msg.ok { background: rgba(52,211,153,.12); color: var(--good); border: 1px solid rgba(52,211,153,.4); }
+
+  .note { margin-top: 24px; font-size: 12px; color: var(--muted); line-height: 1.6; border-top: 1px solid var(--border); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>📍 Address → Lat/Lon Geocoder</h1>
+  <p class="sub">
+    Upload a <strong>CSV</strong> or <strong>XLSX</strong> file with an <code>address</code> column
+    (header in row 1, case-insensitive). Each address is geocoded and exported with new
+    <code>lat</code>, <code>lon</code>, <code>match_level</code> and <code>matched_address</code>
+    columns, in the same format you uploaded. Pick the country below (default Israel; Hebrew
+    supported, e.g. <code>דיזנגוף 50, תל אביב</code>). By default only exact matches are
+    returned; enable the fallback option to let messy addresses degrade to street/city.
+    Check <code>match_level</code> to judge each result.
+  </p>
+
+  <label class="drop" id="drop">
+    <div class="icon">⬆️</div>
+    <div><strong>Click to choose a file</strong> or drag &amp; drop</div>
+    <div class="hint">.csv, .xlsx, or .xls</div>
+    <div class="file" id="fileName"></div>
+    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" />
+  </label>
+
+  <div class="row">
+    <label for="country" class="ctry-label">Country</label>
+    <select id="country">
+      <option value="il" data-lang="he" selected>Israel</option>
+      <option value="it" data-lang="it">Italy</option>
+      <option value="tr" data-lang="tr">Turkey</option>
+      <option value="us" data-lang="en">United States</option>
+      <option value="gb" data-lang="en">United Kingdom</option>
+      <option value="fr" data-lang="fr">France</option>
+      <option value="de" data-lang="de">Germany</option>
+      <option value="es" data-lang="es">Spain</option>
+      <option value="gr" data-lang="el">Greece</option>
+      <option value="" data-lang="en">No restriction (auto)</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label class="check">
+      <input type="checkbox" id="fallback" />
+      <span>Fall back to approximate match when the exact address fails
+      <em>(otherwise leave <code>lat</code>/<code>lon</code> blank)</em></span>
+    </label>
+  </div>
+
+  <div class="row">
+    <button id="geocodeBtn" disabled>Geocode</button>
+    <button id="downloadBtn" class="secondary" style="display:none">Download result</button>
+  </div>
+
+  <div class="bar-wrap" id="barWrap">
+    <div class="bar-bg"><div class="bar-fill" id="barFill"></div></div>
+    <div class="bar-text">
+      <span id="barCount">0 / 0</span>
+      <span id="barEta"></span>
+    </div>
+  </div>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="note">
+    Geocoding uses the free <a href="https://nominatim.openstreetmap.org" target="_blank" style="color:var(--accent)">Nominatim</a> (OpenStreetMap) service,
+    which is rate-limited to ~1 request/second. A hard-to-match address may try several
+    variants (exact → cleaned → street/city → city), so it can take a few seconds; identical
+    queries are cached. Large files take a while — budget ~1 second per attempt.
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const fileInput  = document.getElementById("fileInput");
+  const drop       = document.getElementById("drop");
+  const fileNameEl = document.getElementById("fileName");
+  const geocodeBtn = document.getElementById("geocodeBtn");
+  const downloadBtn= document.getElementById("downloadBtn");
+  const countrySel = document.getElementById("country");
+  const fallbackChk= document.getElementById("fallback");
+  const barWrap    = document.getElementById("barWrap");
+  const barFill    = document.getElementById("barFill");
+  const barCount   = document.getElementById("barCount");
+  const barEta     = document.getElementById("barEta");
+  const msg        = document.getElementById("msg");
+
+  // State of the currently loaded file.
+  let state = null;     // { rows, header, addrIdx, baseName, ext }
+  let outputBlob = null;
+  let outputName = "";
+
+  function showMsg(text, kind) {
+    msg.textContent = text;
+    msg.className = "msg show " + (kind || "");
+  }
+  function hideMsg() { msg.className = "msg"; }
+
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // --- File loading -------------------------------------------------------
+
+  function handleFile(file) {
+    hideMsg();
+    downloadBtn.style.display = "none";
+    barWrap.className = "bar-wrap";
+    outputBlob = null;
+    state = null;
+    geocodeBtn.disabled = true;
+
+    if (!file) return;
+    fileNameEl.textContent = file.name;
+
+    const dot = file.name.lastIndexOf(".");
+    const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : "";
+    const baseName = dot >= 0 ? file.name.slice(0, dot) : file.name;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false, blankrows: false });
+
+        if (!rows.length) {
+          showMsg("The file appears to be empty.", "err");
+          return;
+        }
+        const header = rows[0].map((h) => String(h));
+        const addrIdx = header.findIndex((h) => h.trim().toLowerCase() === "address");
+        if (addrIdx === -1) {
+          showMsg('No "address" column found in row 1. Add a column whose header is "address" (any case).', "err");
+          return;
+        }
+
+        state = { rows, header, addrIdx, baseName, ext };
+        const dataRows = rows.length - 1;
+        geocodeBtn.disabled = false;
+        showMsg('Loaded ' + dataRows + ' row' + (dataRows === 1 ? '' : 's') +
+                '. Address column: "' + header[addrIdx] + '". Ready to geocode.', "ok");
+      } catch (err) {
+        console.error(err);
+        showMsg("Could not read the file: " + err.message, "err");
+      }
+    };
+    reader.onerror = () => showMsg("Failed to read the file.", "err");
+    reader.readAsArrayBuffer(file);
+  }
+
+  fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+
+  ["dragenter", "dragover"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); })
+  );
+  ["dragleave", "drop"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("drag"); })
+  );
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files[0];
+    if (f) { fileInput.files = e.dataTransfer.files; handleFile(f); }
+  });
+
+  // --- Geocoding ----------------------------------------------------------
+
+  // Tokens that reference something other than street/city (landmark, building,
+  // floor, mall, complex...). These break Nominatim's all-tokens-must-match search.
+  const NOISE_RE = /(קומה|קומת|מתחם|שער|טיילת|בניין|מגדל|כניסה|קניון|\bfloor\b|\bfl\.?\b|\bsuite\b|\bste\b|\bunit\b|\bmall\b|\bbldg\b)/i;
+
+  // Build an ordered, de-duplicated list of query variants to try, coarsest last.
+  // Each variant has { level, q }. Country name is appended as a matching hint.
+  function buildQueryVariants(address, countryName) {
+    const withCountry = (s) => {
+      const t = s.trim();
+      if (!t) return t;
+      if (countryName && t.toLowerCase().indexOf(countryName.toLowerCase()) === -1) {
+        return t + ", " + countryName;
+      }
+      return t;
+    };
+
+    // Strip directional/bidi marks and parentheticals up front.
+    const stripped = address.replace(/[‎‏‪-‮]/g, "").replace(/\([^)]*\)/g, " ").trim();
+    const segs = stripped.split(",").map((s) => s.trim()).filter(Boolean);
+
+    const variants = [];
+    const seen = new Set();
+    const push = (level, q) => {
+      const full = withCountry(q);
+      const key = full.toLowerCase();
+      if (full && !seen.has(key)) { seen.add(key); variants.push({ level, q: full }); }
+    };
+
+    // 1. exact — as typed.
+    push("exact", stripped);
+
+    // 2. cleaned — drop segments that look like noise references.
+    if (segs.length > 1) {
+      const kept = segs.filter((s) => !NOISE_RE.test(s));
+      if (kept.length && kept.length < segs.length) push("cleaned", kept.join(", "));
+    }
+
+    // 3. street + city — first segment (street + number) + last (city).
+    if (segs.length > 1) push("street+city", segs[0] + ", " + segs[segs.length - 1]);
+
+    // 4. city only — last segment.
+    if (segs.length > 1) push("city", segs[segs.length - 1]);
+
+    return variants;
+  }
+
+  async function queryNominatim(q, code, lang) {
+    let url = "https://nominatim.openstreetmap.org/search?format=json&limit=1"
+      + "&accept-language=" + encodeURIComponent(lang || "en")
+      + "&q=" + encodeURIComponent(q);
+    if (code) url += "&countrycodes=" + code;
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const results = await resp.json();
+    return results && results.length ? results[0] : null;
+  }
+
+  // Try each variant in order, stopping at the first hit. Returns
+  // { lat, lon, level, displayName } with level "none" if nothing matched.
+  // `cache` maps a query string -> Nominatim result (or null) to avoid re-hitting
+  // the network for repeated strings across rows and across cascade levels.
+  // `onCall` is awaited after every real network request (used for throttling).
+  async function geocodeCascade(address, code, lang, countryName, useFallback, cache, onCall) {
+    let variants = buildQueryVariants(address, countryName);
+    // When fallback is off, only attempt the exact address; otherwise leave blank.
+    if (!useFallback) variants = variants.slice(0, 1);
+    for (const v of variants) {
+      let result;
+      if (cache.has(v.q)) {
+        result = cache.get(v.q);
+      } else {
+        result = await queryNominatim(v.q, code, lang);
+        cache.set(v.q, result);
+        await onCall();
+      }
+      if (result) {
+        return { lat: result.lat, lon: result.lon, level: v.level, displayName: result.display_name || "" };
+      }
+    }
+    return { lat: "", lon: "", level: "none", displayName: "" };
+  }
+
+  function fmtEta(secs) {
+    if (secs < 60) return Math.round(secs) + "s left";
+    const m = Math.floor(secs / 60), s = Math.round(secs % 60);
+    return m + "m " + s + "s left";
+  }
+
+  geocodeBtn.addEventListener("click", async () => {
+    if (!state) return;
+    hideMsg();
+    geocodeBtn.disabled = true;
+    fileInput.disabled = true;
+    downloadBtn.style.display = "none";
+    outputBlob = null;
+    barWrap.className = "bar-wrap show";
+
+    const { rows, header, addrIdx } = state;
+    const dataRows = rows.slice(1);
+    const total = dataRows.length;
+    const latCol = header.length;       // append after existing columns
+    const lonCol = header.length + 1;
+    const lvlCol = header.length + 2;
+    const namCol = header.length + 3;
+
+    // Selected country: code for countrycodes, lang for accept-language, name as hint.
+    const opt = countrySel.options[countrySel.selectedIndex];
+    const code = countrySel.value;                 // "" = no restriction
+    const lang = opt ? opt.getAttribute("data-lang") || "en" : "en";
+    const countryName = code ? opt.textContent.trim() : "";
+    const useFallback = fallbackChk.checked;
+
+    const out = [header.concat(["lat", "lon", "match_level", "matched_address"])];
+    const cache = new Map();
+    let processed = 0, errors = 0;
+    const counts = { exact: 0, cleaned: 0, "street+city": 0, city: 0, none: 0 };
+    const start = Date.now();
+
+    // Throttle: ~1 req/sec per Nominatim policy. Called after each network request.
+    const onCall = () => delay(1100);
+
+    for (const row of dataRows) {
+      // Normalize row length so appended columns line up.
+      const newRow = row.slice();
+      while (newRow.length < header.length) newRow.push("");
+
+      const address = String(newRow[addrIdx] == null ? "" : newRow[addrIdx]).trim();
+      let lat = "", lon = "", level = "", matched = "";
+
+      if (address) {
+        try {
+          const r = await geocodeCascade(address, code, lang, countryName, useFallback, cache, onCall);
+          lat = r.lat; lon = r.lon; level = r.level; matched = r.displayName;
+          counts[r.level] = (counts[r.level] || 0) + 1;
+        } catch (err) {
+          console.error("Geocode failed for:", address, err);
+          level = "error";
+          errors++;
+        }
+      }
+
+      newRow[latCol] = lat;
+      newRow[lonCol] = lon;
+      newRow[lvlCol] = level;
+      newRow[namCol] = matched;
+      out.push(newRow);
+
+      processed++;
+      const pct = total ? (processed / total) * 100 : 100;
+      barFill.style.width = pct.toFixed(1) + "%";
+      barCount.textContent = processed + " / " + total;
+      const elapsed = (Date.now() - start) / 1000;
+      const rate = processed / elapsed;
+      const remaining = rate > 0 ? (total - processed) / rate : 0;
+      barEta.textContent = processed < total ? fmtEta(remaining) : "done";
+    }
+
+    buildOutput(out);
+
+    const fallback = counts.cleaned + counts["street+city"] + counts.city;
+    const parts = [counts.exact + " exact"];
+    if (fallback) parts.push(fallback + " fallback (street/city)");
+    if (counts.none) parts.push(counts.none + " not found");
+    if (errors) parts.push(errors + " errored");
+    showMsg(parts.join(", ") + ". Click “Download result” to save.", (counts.none || errors) ? "err" : "ok");
+
+    downloadBtn.style.display = "inline-block";
+    fileInput.disabled = false;
+    geocodeBtn.disabled = false;
+  });
+
+  // --- Output building ----------------------------------------------------
+
+  function buildOutput(aoa) {
+    const { baseName, ext } = state;
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+
+    if (ext === "csv") {
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const withBom = "﻿" + csv;          // BOM so Excel reads UTF-8 (Hebrew) correctly
+      outputBlob = new Blob([withBom], { type: "text/csv;charset=utf-8;" });
+      outputName = baseName + "_geocoded.csv";
+    } else {
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      outputBlob = new Blob([wbout], { type: "application/octet-stream" });
+      outputName = baseName + "_geocoded." + (ext === "xls" ? "xls" : "xlsx");
+    }
+  }
+
+  downloadBtn.addEventListener("click", () => {
+    if (!outputBlob) return;
+    const url = URL.createObjectURL(outputBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = outputName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+})();
+</script>
+</body>
+</html>
