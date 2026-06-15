@@ -86,6 +86,20 @@
   }
   select:focus { outline: none; border-color: var(--accent); }
 
+  input[type=text], input[type=password] {
+    background: #0b1220;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 14px;
+    flex: 1;
+    min-width: 200px;
+  }
+  input[type=text]:focus, input[type=password]:focus { outline: none; border-color: var(--accent); }
+  .key-help { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .key-help a { color: var(--accent); }
+
   .check { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.45; }
   .check input { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
   .check em { font-style: normal; opacity: .8; }
@@ -127,6 +141,28 @@
   </label>
 
   <div class="row">
+    <label for="provider" class="ctry-label">Geocoder</label>
+    <select id="provider">
+      <option value="geoapify" selected>Geoapify (API key)</option>
+      <option value="nominatim">Nominatim / OpenStreetMap (free)</option>
+    </select>
+  </div>
+
+  <div class="row" id="apiKeyRow">
+    <label for="apiKey" class="ctry-label" id="apiKeyLabel">API key</label>
+    <input type="password" id="apiKey" placeholder="Paste your Geoapify API key"
+           autocomplete="off" spellcheck="false" />
+    <label class="check" style="margin-top:0">
+      <input type="checkbox" id="rememberKey" checked />
+      <span>Remember on this browser</span>
+    </label>
+  </div>
+  <div class="key-help" id="keyHelp">
+    Your key is stored only in this browser and is never sent anywhere except Geoapify.
+    Get a free key at <a href="https://www.geoapify.com/" target="_blank" rel="noopener">geoapify.com</a>.
+  </div>
+
+  <div class="row">
     <label for="country" class="ctry-label">Country</label>
     <select id="country">
       <option value="il" data-lang="he" selected>Israel</option>
@@ -165,12 +201,7 @@
 
   <div class="msg" id="msg"></div>
 
-  <div class="note">
-    Geocoding uses the free <a href="https://nominatim.openstreetmap.org" target="_blank" style="color:var(--accent)">Nominatim</a> (OpenStreetMap) service,
-    which is rate-limited to ~1 request/second. A hard-to-match address may try several
-    variants (exact → cleaned → street/city → city), so it can take a few seconds; identical
-    queries are cached. Large files take a while — budget ~1 second per attempt.
-  </div>
+  <div class="note" id="note"></div>
 </div>
 
 <script>
@@ -184,6 +215,13 @@
   const downloadBtn= document.getElementById("downloadBtn");
   const countrySel = document.getElementById("country");
   const fallbackChk= document.getElementById("fallback");
+  const providerSel= document.getElementById("provider");
+  const apiKeyInput= document.getElementById("apiKey");
+  const apiKeyRow  = document.getElementById("apiKeyRow");
+  const apiKeyLabel= document.getElementById("apiKeyLabel");
+  const keyHelp    = document.getElementById("keyHelp");
+  const rememberKey= document.getElementById("rememberKey");
+  const noteEl     = document.getElementById("note");
   const barWrap    = document.getElementById("barWrap");
   const barFill    = document.getElementById("barFill");
   const barCount   = document.getElementById("barCount");
@@ -202,6 +240,53 @@
   function hideMsg() { msg.className = "msg"; }
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // --- Provider selection & API key --------------------------------------
+
+  const KEY_STORE = "geoapify_api_key";
+
+  // Restore a previously remembered Geoapify key.
+  try {
+    const saved = localStorage.getItem(KEY_STORE);
+    if (saved) apiKeyInput.value = saved;
+  } catch (_) { /* localStorage may be unavailable; ignore */ }
+
+  const GEOAPIFY_LINK =
+    '<a href="https://www.geoapify.com/" target="_blank" rel="noopener" ' +
+    'style="color:var(--accent)">Geoapify</a>';
+
+  const NOTE_GEOAPIFY =
+    'Geocoding uses ' + GEOAPIFY_LINK + ' with your API key. The free tier allows ' +
+    '~5 requests/second and 3,000 lookups/day; the app throttles to ~4/second to stay ' +
+    'safely under that. A hard-to-match address may try several variants ' +
+    '(exact → cleaned → street/city → city); identical queries are cached. ' +
+    'Budget well under a second per attempt.';
+  const NOTE_NOMINATIM =
+    'Geocoding uses the free <a href="https://nominatim.openstreetmap.org" target="_blank" ' +
+    'rel="noopener" style="color:var(--accent)">Nominatim</a> (OpenStreetMap) service, which ' +
+    'is rate-limited to ~1 request/second. If a Geoapify key is supplied below, any address ' +
+    'OpenStreetMap can\'t find is retried through ' + GEOAPIFY_LINK + ' as a fallback. ' +
+    'Identical queries are cached. Large files take a while — budget ~1 second per attempt.';
+
+  const HELP_GEOAPIFY =
+    'Your key is stored only in this browser and is never sent anywhere except Geoapify. ' +
+    'Get a free key at ' + GEOAPIFY_LINK + '.';
+  const HELP_NOMINATIM =
+    'Optional. If provided, Geoapify is used as a fallback whenever OpenStreetMap returns no ' +
+    'match. Stored only in this browser. Free key at ' + GEOAPIFY_LINK + '.';
+
+  function updateProviderUI() {
+    const isGeoapify = providerSel.value === "geoapify";
+    // Key field is always shown: required for Geoapify, optional fallback for Nominatim.
+    apiKeyLabel.textContent = isGeoapify ? "API key" : "API key (optional)";
+    apiKeyInput.placeholder = isGeoapify
+      ? "Paste your Geoapify API key"
+      : "Geoapify key — used only as a fallback";
+    keyHelp.innerHTML = isGeoapify ? HELP_GEOAPIFY : HELP_NOMINATIM;
+    noteEl.innerHTML  = isGeoapify ? NOTE_GEOAPIFY : NOTE_NOMINATIM;
+  }
+  providerSel.addEventListener("change", updateProviderUI);
+  updateProviderUI();
 
   // --- File loading -------------------------------------------------------
 
@@ -314,6 +399,9 @@
     return variants;
   }
 
+  // Provider query functions. Each takes a query string and returns a normalized
+  // { lat, lon, display_name } object, or null if nothing matched.
+
   async function queryNominatim(q, code, lang) {
     let url = "https://nominatim.openstreetmap.org/search?format=json&limit=1"
       + "&accept-language=" + encodeURIComponent(lang || "en")
@@ -322,26 +410,48 @@
     const resp = await fetch(url, { headers: { "Accept": "application/json" } });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     const results = await resp.json();
-    return results && results.length ? results[0] : null;
+    if (!results || !results.length) return null;
+    const r = results[0];
+    return { lat: r.lat, lon: r.lon, display_name: r.display_name || "" };
+  }
+
+  async function queryGeoapify(q, code, lang, apiKey) {
+    let url = "https://api.geoapify.com/v1/geocode/search?format=json&limit=1"
+      + "&text=" + encodeURIComponent(q)
+      + "&apiKey=" + encodeURIComponent(apiKey);
+    if (lang) url += "&lang=" + encodeURIComponent(lang);
+    if (code) url += "&filter=" + encodeURIComponent("countrycode:" + code);
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) {
+      // Surface auth/quota problems clearly instead of a generic failure.
+      if (resp.status === 401) throw new Error("Geoapify rejected the API key (HTTP 401)");
+      if (resp.status === 429) throw new Error("Geoapify rate/quota limit hit (HTTP 429)");
+      throw new Error("HTTP " + resp.status);
+    }
+    const data = await resp.json();
+    const r = data && data.results && data.results.length ? data.results[0] : null;
+    if (!r) return null;
+    return { lat: r.lat, lon: r.lon, display_name: r.formatted || "" };
   }
 
   // Try each variant in order, stopping at the first hit. Returns
   // { lat, lon, level, displayName } with level "none" if nothing matched.
-  // `cache` maps a query string -> Nominatim result (or null) to avoid re-hitting
-  // the network for repeated strings across rows and across cascade levels.
-  // `onCall` is awaited after every real network request (used for throttling).
-  async function geocodeCascade(address, code, lang, countryName, useFallback, cache, onCall) {
+  // `prov` is { tag, queryFn, onCall }: queryFn hits the network, onCall is awaited
+  // afterwards for throttling. The cache is shared across providers but keyed by
+  // `tag|query` so a "not found" from one provider never masks the other's result.
+  async function geocodeCascade(address, prov, countryName, useFallback, cache) {
     let variants = buildQueryVariants(address, countryName);
     // When fallback is off, only attempt the exact address; otherwise leave blank.
     if (!useFallback) variants = variants.slice(0, 1);
     for (const v of variants) {
+      const key = prov.tag + "|" + v.q;
       let result;
-      if (cache.has(v.q)) {
-        result = cache.get(v.q);
+      if (cache.has(key)) {
+        result = cache.get(key);
       } else {
-        result = await queryNominatim(v.q, code, lang);
-        cache.set(v.q, result);
-        await onCall();
+        result = await prov.queryFn(v.q);
+        cache.set(key, result);
+        await prov.onCall();
       }
       if (result) {
         return { lat: result.lat, lon: result.lon, level: v.level, displayName: result.display_name || "" };
@@ -358,6 +468,21 @@
 
   geocodeBtn.addEventListener("click", async () => {
     if (!state) return;
+
+    // Validate provider config before locking the UI.
+    const provider = providerSel.value;
+    const apiKey = apiKeyInput.value.trim();
+    if (provider === "geoapify" && !apiKey) {
+      showMsg("Enter your Geoapify API key first (free key at geoapify.com).", "err");
+      return;
+    }
+    // Persist (or forget) the key per the checkbox. The key is kept even for Nominatim,
+    // since it can still be used as the Geoapify fallback.
+    try {
+      if (apiKey && rememberKey.checked) localStorage.setItem(KEY_STORE, apiKey);
+      else if (!rememberKey.checked) localStorage.removeItem(KEY_STORE);
+    } catch (_) { /* ignore storage errors */ }
+
     hideMsg();
     geocodeBtn.disabled = true;
     fileInput.disabled = true;
@@ -386,8 +511,18 @@
     const counts = { exact: 0, cleaned: 0, "street+city": 0, city: 0, none: 0 };
     const start = Date.now();
 
-    // Throttle: ~1 req/sec per Nominatim policy. Called after each network request.
-    const onCall = () => delay(1100);
+    // Provider descriptors. Each carries its own throttle: Nominatim caps at ~1 req/sec;
+    // Geoapify's free tier allows ~5 req/sec, so we wait ~250ms (~4/sec) to stay under it.
+    const geoapifyProv  = { tag: "geoapify",  queryFn: (q) => queryGeoapify(q, code, lang, apiKey), onCall: () => delay(250) };
+    const nominatimProv = { tag: "nominatim", queryFn: (q) => queryNominatim(q, code, lang),        onCall: () => delay(1100) };
+
+    // Primary provider runs first. For Nominatim, Geoapify (if a key is given) is a
+    // secondary fallback used only when OpenStreetMap returns no match.
+    const primary = provider === "geoapify" ? geoapifyProv : nominatimProv;
+    let secondary = (provider === "nominatim" && apiKey) ? geoapifyProv : null;
+    let secondaryDisabled = "";   // set if the Geoapify fallback key turns out to be bad
+
+    let fatal = null;   // set on a key/quota error to stop the whole run early
 
     for (const row of dataRows) {
       // Normalize row length so appended columns line up.
@@ -399,13 +534,43 @@
 
       if (address) {
         try {
-          const r = await geocodeCascade(address, code, lang, countryName, useFallback, cache, onCall);
+          let r = await geocodeCascade(address, primary, countryName, useFallback, cache);
+
+          // Nominatim found nothing — try the Geoapify fallback if it's enabled.
+          if (r.level === "none" && secondary) {
+            try {
+              const r2 = await geocodeCascade(address, secondary, countryName, useFallback, cache);
+              if (r2.level !== "none") {
+                r = r2;
+                counts.viaGeoapify = (counts.viaGeoapify || 0) + 1;
+              }
+            } catch (err2) {
+              // A bad/quota-limited fallback key shouldn't kill an otherwise-working
+              // Nominatim run — disable the fallback and carry on with a warning.
+              if (/HTTP 401|HTTP 429|API key/i.test(err2.message || "")) {
+                secondary = null;
+                secondaryDisabled = err2.message;
+                console.warn("Geoapify fallback disabled:", err2.message);
+              } else {
+                throw err2;
+              }
+            }
+          }
+
           lat = r.lat; lon = r.lon; level = r.level; matched = r.displayName;
           counts[r.level] = (counts[r.level] || 0) + 1;
         } catch (err) {
           console.error("Geocode failed for:", address, err);
           level = "error";
           errors++;
+          // A rejected key or exhausted quota on the PRIMARY provider fails every row — bail.
+          if (/HTTP 401|HTTP 429|API key/i.test(err.message || "")) {
+            fatal = err.message;
+            newRow[latCol] = lat; newRow[lonCol] = lon;
+            newRow[lvlCol] = level; newRow[namCol] = matched;
+            out.push(newRow);
+            break;
+          }
         }
       }
 
@@ -423,6 +588,16 @@
       const rate = processed / elapsed;
       const remaining = rate > 0 ? (total - processed) / rate : 0;
       barEta.textContent = processed < total ? fmtEta(remaining) : "done";
+
+      if (fatal) break;
+    }
+
+    if (fatal) {
+      showMsg("Stopped: " + fatal + ". Check your API key / quota and try again.", "err");
+      barWrap.className = "bar-wrap";
+      fileInput.disabled = false;
+      geocodeBtn.disabled = false;
+      return;
     }
 
     buildOutput(out);
@@ -430,9 +605,12 @@
     const fallback = counts.cleaned + counts["street+city"] + counts.city;
     const parts = [counts.exact + " exact"];
     if (fallback) parts.push(fallback + " fallback (street/city)");
+    if (counts.viaGeoapify) parts.push(counts.viaGeoapify + " rescued via Geoapify");
     if (counts.none) parts.push(counts.none + " not found");
     if (errors) parts.push(errors + " errored");
-    showMsg(parts.join(", ") + ". Click “Download result” to save.", (counts.none || errors) ? "err" : "ok");
+    let summary = parts.join(", ") + ". Click “Download result” to save.";
+    if (secondaryDisabled) summary += " (Geoapify fallback was disabled: " + secondaryDisabled + ".)";
+    showMsg(summary, (counts.none || errors || secondaryDisabled) ? "err" : "ok");
 
     downloadBtn.style.display = "inline-block";
     fileInput.disabled = false;
